@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Client - Partage écran & contrôle</title>
+</head>
+<body>
+  <h2>Contrôle à distance - Consentement requis</h2>
+  <p>Pour accepter le contrôle à distance, cliquez sur le bouton ci-dessous.</p>
+  <button id="accept">Accepter et démarrer partage écran</button>
+  <p id="status"></p>
+
+<script>
+const ws = new WebSocket('ws://TON_SERVEUR:8080');
+let pc; // PeerConnection
+let localStream;
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: 'role', role: 'client' }));
+  updateStatus("Connecté au serveur.");
+};
+
+ws.onmessage = async (event) => {
+  const data = JSON.parse(event.data);
+
+  if(data.type === 'webrtc') {
+    if(data.description) {
+      const desc = new RTCSessionDescription(data.description);
+      if(desc.type === 'offer') {
+        await pc.setRemoteDescription(desc);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'webrtc', description: pc.localDescription }));
+      } else if(desc.type === 'answer') {
+        await pc.setRemoteDescription(desc);
+      }
+    } else if(data.candidate) {
+      try {
+        await pc.addIceCandidate(data.candidate);
+      } catch(e) {
+        console.error("Erreur addIceCandidate:", e);
+      }
+    }
+  } else if(data.type === 'command') {
+    handleCommand(data.command);
+  }
+};
+
+function updateStatus(msg) {
+  document.getElementById('status').innerText = msg;
+}
+
+// Initialise WebRTC peer connection
+async function startPeerConnection() {
+  pc = new RTCPeerConnection();
+
+  pc.onicecandidate = event => {
+    if(event.candidate) {
+      ws.send(JSON.stringify({ type: 'webrtc', candidate: event.candidate }));
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if(pc.connectionState === 'connected') {
+      updateStatus("Connexion WebRTC établie.");
+      ws.send(JSON.stringify({ type: 'status', message: 'Partage d\'écran actif et prêt.' }));
+    }
+  };
+
+  // Ajout du flux local (écran partagé)
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type: 'webrtc', description: pc.localDescription }));
+}
+
+// Commandes possibles
+function handleCommand(cmd) {
+  alert(`Commande reçue : ${cmd}`);
+  if(cmd === 'open_whatsapp') {
+    alert("Ouverture de WhatsApp Web");
+    window.open('https://web.whatsapp.com', '_blank');
+  }
+  if(cmd === 'open_snapchat') {
+    alert("Ouverture de Snapchat Web");
+    window.open('https://web.snapchat.com', '_blank');
+  }
+  // Ajoute ici d'autres commandes possibles
+}
+
+document.getElementById('accept').onclick = async () => {
+  try {
+    localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    updateStatus("Partage d'écran démarré.");
+    await startPeerConnection();
+  } catch(err) {
+    alert("Erreur ou refus de partage d'écran: " + err.message);
+    updateStatus("Partage d'écran refusé.");
+    ws.send(JSON.stringify({ type: 'status', message: 'Partage d\'écran refusé par l\'utilisateur.' }));
+  }
+};
+</script>
+</body>
+</html>

